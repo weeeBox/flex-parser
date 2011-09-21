@@ -26,10 +26,18 @@ import static macromedia.asc.parser.Tokens.LEFTBRACKET_TOKEN;
 import static macromedia.asc.parser.Tokens.LEFTPAREN_TOKEN;
 import static macromedia.asc.parser.Tokens.SET_TOKEN;
 
+import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+
+import code.ASMemberDeclaration;
+
 import macromedia.asc.parser.*;
 import macromedia.asc.semantics.Value;
 import macromedia.asc.util.Context;
 import macromedia.asc.util.NumberUsage;
+import macromedia.asc.util.ObjectList;
 
 /**
  * NodePrinter.h
@@ -40,10 +48,22 @@ import macromedia.asc.util.NumberUsage;
  */
 public class NodePrinter implements Evaluator
 {
-    private WriteDestination out;
+    private PrintStream out;
+    private WriteDestination hdr;
+    private WriteDestination imp;
     private int level;
     private int mode;
 
+    private String lastFunction;
+    private String lastVisiblity;
+    private String lastQualifiedidentifier;
+    private String lastType;
+    
+    private boolean staticFound;
+    
+    private List<ASMemberDeclaration> members = new ArrayList<ASMemberDeclaration>();
+    private LinkedList<String> identifiers = new LinkedList<String>();
+    
     private void separate()
     {
     }
@@ -51,7 +71,7 @@ public class NodePrinter implements Evaluator
     private void push_in()
     {
         ++level;
-        out.write(" ");
+        out.print(" ");
     }
 
     private void pop_out()
@@ -63,10 +83,10 @@ public class NodePrinter implements Evaluator
     {
         if (mode == man_mode)
         {
-            out.writeln();
+            out.println();
             for (int i = level; i != 0; --i)
             {
-                out.write("  ");
+                out.print("  ");
             }
         }
     }
@@ -81,9 +101,10 @@ public class NodePrinter implements Evaluator
         return true; // return true;
     }
 
-    public NodePrinter(WriteDestination out)
+    public NodePrinter(WriteDestination headerDest, WriteDestination implDest)
     {
-        this.out = out;
+    	this.hdr = headerDest;
+        this.out = System.out;
         this.level = 0;
     }
 
@@ -92,7 +113,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, Node node)
     {
         indent();
-        out.write("error:undefined printer method");
+        out.print("error:undefined printer method");
         return null;
     }
 
@@ -104,20 +125,33 @@ public class NodePrinter implements Evaluator
 
         if(node instanceof TypeIdentifierNode)
         {
-            out.write("typeidentifier ");
+            out.print("typeidentifier ");
         }
         else if (node.isAttr())
         {
-            out.write("attributeidentifier ");
+            out.print("attributeidentifier ");
         }
         else
         {
-            out.write("identifier ");
+            out.print("identifier ");
         }
-        out.write(node.name);
+		out.print(node.name);
+		String name = node.name;
+		if (name.equals("private") || name.equals("public") || name.equals("protected"))
+		{
+			lastVisiblity = name;
+		}
+		else if (name.equals("static"))
+		{
+			staticFound = true;
+		}
+		else
+		{
+			identifiers.add(name);
+		}
         if(node instanceof TypeIdentifierNode)
         {
-            out.write("types ");
+            out.print("types ");
             push_in();
             ((TypeIdentifierNode)node).typeArgs.evaluate(cx, this);
             pop_out();
@@ -130,13 +164,13 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, IncrementNode node)
     {
         indent();
-        out.write("increment");
-        out.write((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
+        out.print("increment");
+        out.print((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == DOT_TOKEN ? " dot" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " error"));
-        out.write((node.isPostfix ? " postfix " : " prefix ") + Token.getTokenClassName(node.op));
+        out.print((node.isPostfix ? " postfix " : " prefix ") + Token.getTokenClassName(node.op));
         push_in();
         pop_out();
         separate();
@@ -152,7 +186,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ThisExpressionNode node)
     {
         indent();
-        out.write("this");
+        out.print("this");
         return null;
     }
 
@@ -161,18 +195,20 @@ public class NodePrinter implements Evaluator
         indent();
         if (node.isAttr())
         {
-            out.write("qualifiedattributeidentifier ");
+            out.print("qualifiedattributeidentifier ");
         }
         else
         {
-            out.write("qualifiedidentifier ");
+            out.print("qualifiedidentifier ");
         }
-        out.write(node.name);
+        out.print(node.name);
+        lastQualifiedidentifier = node.name;
+        
         if (node.qualifier != null)
         {
             push_in();
             indent();
-            out.write("qualifier");
+            out.print("qualifier");
             push_in();
             node.qualifier.evaluate(cx, this);
             pop_out();
@@ -186,18 +222,18 @@ public class NodePrinter implements Evaluator
         indent();
         if (node.isAttr())
         {
-            out.write("qualifiedattributeexpression ");
+            out.print("qualifiedattributeexpression ");
         }
         else
         {
-            out.write("qualifiedexpression ");
+            out.print("qualifiedexpression ");
         }
-        out.write(node.name);
+        out.print(node.name);
         if (node.qualifier != null)
         {
             push_in();
             indent();
-            out.write("qualifier");
+            out.print("qualifier");
             push_in();
             node.qualifier.evaluate(cx, this);
             pop_out();
@@ -207,7 +243,7 @@ public class NodePrinter implements Evaluator
         {
             push_in();
             indent();
-            out.write("expr");
+            out.print("expr");
             push_in();
             node.expr.evaluate(cx, this);
             pop_out();
@@ -219,46 +255,46 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, LiteralBooleanNode node)
     {
         indent();
-        out.write("literalboolean ");
-        out.write(node.value ? 1 : 0);
+        out.print("literalboolean ");
+        out.print(node.value ? 1 : 0);
         return null;
     }
 
     public Value evaluate(Context cx, LiteralNumberNode node)
     {
         indent();
-        out.write("literalnumber:");
-        out.write(node.value);
+        out.print("literalnumber:");
+        out.print(node.value);
         return null;
     }
 
     public Value evaluate(Context cx, LiteralStringNode node)
     {
         indent();
-        out.write("literalstring:");
-        out.write(node.value);
+        out.print("literalstring:");
+        out.print(node.value);
         return null;
     }
 
     public Value evaluate(Context cx, LiteralNullNode node)
     {
         indent();
-        out.write("literalnull");
+        out.print("literalnull");
         return null;
     }
 
     public Value evaluate(Context cx, LiteralRegExpNode node)
     {
         indent();
-        out.write("literalregexp:");
-        out.write(node.value);
+        out.print("literalregexp:");
+        out.print(node.value);
         return null;
     }
 
     public Value evaluate(Context cx, LiteralXMLNode node)
     {
         indent();
-        out.write("literalxml");
+        out.print("literalxml");
         push_in();
         if (node.list != null)
         {
@@ -271,7 +307,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, FunctionCommonNode node)
     {
         indent();
-        out.write("functioncommon");
+        out.print("functioncommon");
         push_in();
         if (node.signature != null)
         {
@@ -289,14 +325,14 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ParenExpressionNode node)
     {
         indent();
-        out.write("paren");
+        out.print("paren");
         return null;
     }
 
     public Value evaluate(Context cx, ParenListExpressionNode node)
     {
         indent();
-        out.write("parenlist");
+        out.print("parenlist");
         if (node.expr != null)
         {
             node.expr.evaluate(cx, this);
@@ -307,7 +343,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, LiteralObjectNode node)
     {
         indent();
-        out.write("literalobject");
+        out.print("literalobject");
         push_in();
         if (node.fieldlist != null)
         {
@@ -320,7 +356,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, LiteralFieldNode node)
     {
         indent();
-        out.write("literalfield");
+        out.print("literalfield");
         push_in();
         if (node.name != null)
         {
@@ -338,7 +374,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, LiteralArrayNode node)
     {
         indent();
-        out.write("literalarray");
+        out.print("literalarray");
         push_in();
         if (node.elementlist != null)
         {
@@ -351,9 +387,9 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, LiteralVectorNode node)
     {
         indent();
-        out.write("new<");
+        out.print("new<");
         node.type.evaluate(cx, this);
-        out.write(">");
+        out.print(">");
         
         push_in();
         if (node.elementlist != null)
@@ -367,7 +403,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, SuperExpressionNode node)
     {
         indent();
-        out.write("superexpression");
+        out.print("superexpression");
         push_in();
         if (node.expr != null)
         {
@@ -380,7 +416,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, MemberExpressionNode node)
     {
         indent();
-        out.write("member");
+        out.print("member");
         push_in();
         if (node.base != null)
         {
@@ -399,13 +435,13 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, InvokeNode node)
     {
         indent();
-        out.write("invoke");
-        out.write((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
+        out.print("invoke");
+        out.print((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
         push_in();
-        out.write(node.name);
+        out.print(node.name);
         separate();
         if (node.args != null)
         {
@@ -418,8 +454,8 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, CallExpressionNode node)
     {
         indent();
-        out.write((node.is_new ? "construct" : "call"));
-        out.write((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
+        out.print((node.is_new ? "construct" : "call"));
+        out.print((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
@@ -441,8 +477,8 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, DeleteExpressionNode node)
     {
         indent();
-        out.write("delete");
-        out.write((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
+        out.print("delete");
+        out.print((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
@@ -458,7 +494,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ApplyTypeExprNode node)
     {
         indent();
-        out.write("applytype");
+        out.print("applytype");
         push_in();
         node.typeArgs.evaluate(cx, this);
         pop_out();
@@ -468,11 +504,15 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, GetExpressionNode node)
     {
         indent();
-        out.write("get");
-        out.write((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
+        out.print("get");
+        out.print((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
+        hdr.write((node.getMode() == LEFTBRACKET_TOKEN ? "" :
+            node.getMode() == LEFTPAREN_TOKEN ? "" :
+            node.getMode() == DOUBLEDOT_TOKEN ? "" :
+            node.getMode() == EMPTY_TOKEN ? "" : "."));
         push_in();
         if (node.expr != null)
         {
@@ -485,8 +525,8 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, SetExpressionNode node)
     {
         indent();
-        out.write("set");
-        out.write((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
+        out.print("set");
+        out.print((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
@@ -507,9 +547,10 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, UnaryExpressionNode node)
     {
         indent();
-        out.write("unary");
+        out.print("unary");
         push_in();
-        out.write(Token.getTokenClassName(node.op));
+        out.print(Token.getTokenClassName(node.op));
+        hdr.write(CodeHelper.tokenName(node.op));
         pop_out();
         separate();
         push_in();
@@ -524,9 +565,9 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, BinaryExpressionNode node)
     {
         indent();
-        out.write("binary");
+        out.print("binary");
         push_in();
-        out.write(Token.getTokenClassName(node.op));
+        out.print(Token.getTokenClassName(node.op));
         pop_out();
         separate();
         push_in();
@@ -546,7 +587,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ConditionalExpressionNode node)
     {
         indent();
-        out.write("cond");
+        out.print("cond");
         push_in();
         if (node.condition != null)
         {
@@ -571,7 +612,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ArgumentListNode node)
     {
         indent();
-        out.write("argumentlist");
+        out.print("argumentlist");
 
         push_in();
 
@@ -589,7 +630,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ListNode node)
     {
         indent();
-        out.write("list");
+        out.print("list");
 
         push_in();
 
@@ -609,9 +650,11 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, StatementListNode node)
     {
         indent();
-        //out.write("statementlist");
+        out.print("statementlist");
+        hdr.writeln();
+        hdr.writeln("{");
+        hdr.incTab();
         push_in();
-        out.writeln("{");
 
         for (Node n : node.items)
         {
@@ -623,30 +666,31 @@ public class NodePrinter implements Evaluator
 
         pop_out();
         
-        indent();
-        out.writeln("}");
-
+        hdr.decTab();
+        hdr.writeln("");
+        hdr.writeln("}");
+        
         return null;
     }
 
     public Value evaluate(Context cx, EmptyElementNode node)
     {
         indent();
-        out.write("empty");
+        out.print("empty");
         return null;
     }
 
     public Value evaluate(Context cx, EmptyStatementNode node)
     {
         indent();
-        out.write("empty");
+        out.print("empty");
         return null;
     }
 
     public Value evaluate(Context cx, ExpressionStatementNode node)
     {
         indent();
-        out.write("expression");
+        out.print("expression");
         push_in();
         if (node.expr != null)
         {
@@ -659,7 +703,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, SuperStatementNode node)
     {
         indent();
-        out.write("super");
+        out.print("super");
         push_in();
         if (node.call.args != null)
         {
@@ -672,7 +716,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, LabeledStatementNode node)
     {
         indent();
-        out.write("labeled");
+        out.print("labeled");
         push_in();
         if (node.label != null)
         {
@@ -692,12 +736,14 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, IfStatementNode node)
     {
         indent();
-        out.write("if");
+        out.print("if");
+        hdr.write("if(");
         push_in();
         if (node.condition != null)
         {
             node.condition.evaluate(cx, this);
         }
+        hdr.writeln(")");
         pop_out();
         separate();
         push_in();
@@ -719,7 +765,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, SwitchStatementNode node)
     {
         indent();
-        out.write("switch");
+        out.print("switch");
         push_in();
         if (node.expr != null)
         {
@@ -739,7 +785,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, CaseLabelNode node)
     {
         indent();
-        out.write("case");
+        out.print("case");
         push_in();
         if (node.label != null)
         {
@@ -747,7 +793,7 @@ public class NodePrinter implements Evaluator
         }
         else
         {
-            out.write("default");
+            out.print("default");
         }
         pop_out();
         return null;
@@ -756,7 +802,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, DoStatementNode node)
     {
         indent();
-        out.write("do");
+        out.print("do");
         push_in();
         if (node.expr != null)
         {
@@ -776,7 +822,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, WhileStatementNode node)
     {
         indent();
-        out.write("while");
+        out.print("while");
         push_in();
         if (node.expr != null)
         {
@@ -796,7 +842,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ForStatementNode node)
     {
         indent();
-        out.write("for");
+        out.print("for");
         push_in();
         if (node.initialize != null)
         {
@@ -830,7 +876,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, WithStatementNode node)
     {
         indent();
-        out.write("with");
+        out.print("with");
         push_in();
         if (node.expr != null)
         {
@@ -850,7 +896,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ContinueStatementNode node)
     {
         indent();
-        out.write("continue");
+        out.print("continue");
         push_in();
         if (node.id != null)
         {
@@ -863,7 +909,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, BreakStatementNode node)
     {
         indent();
-        out.write("break");
+        out.print("break");
         push_in();
         if (node.id != null)
         {
@@ -876,7 +922,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ReturnStatementNode node)
     {
         indent();
-        out.write("return");
+        out.print("return");
         push_in();
         if (node.expr != null)
         {
@@ -889,7 +935,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ThrowStatementNode node)
     {
         indent();
-        out.write("throw");
+        out.print("throw");
         push_in();
         if (node.expr != null)
         {
@@ -902,7 +948,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, TryStatementNode node)
     {
         indent();
-        out.write("try");
+        out.print("try");
         push_in();
         if (node.tryblock != null)
         {
@@ -929,7 +975,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, CatchClauseNode node)
     {
         indent();
-        out.write("catch");
+        out.print("catch");
         push_in();
         if (node.parameter != null)
         {
@@ -949,7 +995,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, FinallyClauseNode node)
     {
         indent();
-        out.write("finally");
+        out.print("finally");
         push_in();
         if (node.statements != null)
         {
@@ -962,7 +1008,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, UseDirectiveNode node)
     {
         indent();
-        out.write("use");
+        out.print("use");
         if( node.expr != null )
         {
             node.expr.evaluate(cx,this);
@@ -973,7 +1019,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, IncludeDirectiveNode node)
     {
         indent();
-        out.write("include");
+        out.print("include");
         push_in();
         if (node.filespec != null)
         {
@@ -994,7 +1040,8 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ImportDirectiveNode node)
     {
         indent();
-        out.write("import");
+        out.print("import");
+        hdr.write("#import ");
         push_in();
         if (node.attrs != null)
         {
@@ -1008,6 +1055,9 @@ public class NodePrinter implements Evaluator
             node.name.evaluate(cx, this);
         }
         pop_out();
+        
+        ObjectList<IdentifierNode> list = node.name.id.list;
+        hdr.writeln('"' + list.at(list.size() - 1).name + ".h" + '"');
 
         return null;
     }
@@ -1015,7 +1065,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, AttributeListNode node)
     {
         indent();
-        out.write("attributelist");
+        out.print("attributelist");
 
         push_in();
 
@@ -1032,14 +1082,18 @@ public class NodePrinter implements Evaluator
 
     public Value evaluate(Context cx, VariableDefinitionNode node)
     {
+    	staticFound = false;
+    	boolean isConst = false;
+    	
         indent();
         if (node.kind == CONST_TOKEN)
         {
-            out.write("const");
+            out.print("const");
+            isConst = true;
         }
         else
         {
-            out.write("var");
+            out.print("var");
         }
         push_in();
         if (node.attrs != null)
@@ -1054,13 +1108,22 @@ public class NodePrinter implements Evaluator
             node.list.evaluate(cx, this);
         }
         pop_out();
+        
+        ASMemberDeclaration member = new ASMemberDeclaration(lastType, lastIdentifier(), lastVisiblity);
+        member.setStatic(staticFound);
+        member.setConst(isConst);
+        
+        members.add(member);
+        
+        staticFound = false;
+        
         return null;
     }
 
     public Value evaluate(Context cx, VariableBindingNode node)
     {
         indent();
-        out.write("variablebinding");
+        out.print("variablebinding");
         push_in();
         if (node.variable != null)
         {
@@ -1078,7 +1141,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, UntypedVariableBindingNode node)
     {
         indent();
-        out.write("untypedvariablebinding");
+        out.print("untypedvariablebinding");
         push_in();
         if (node.identifier != null)
         {
@@ -1096,7 +1159,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, TypedIdentifierNode node)
     {
         indent();
-        out.write("typedidentifier");
+        out.print("typedidentifier");
         push_in();
         if (node.identifier != null)
         {
@@ -1119,7 +1182,8 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, FunctionDefinitionNode node)
     {
         indent();
-        out.write("function");
+        out.print("function");
+        
         push_in();
         if (node.attrs != null)
         {
@@ -1129,6 +1193,7 @@ public class NodePrinter implements Evaluator
         if (node.name != null)
         {
             node.name.evaluate(cx, this);
+            lastFunction = node.name.identifier.name;
         }
         separate();
         if (node.fexpr != null)
@@ -1142,8 +1207,8 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, FunctionNameNode node)
     {
         indent();
-        out.write("functionname");
-        out.write((node.kind == GET_TOKEN ? " get" :
+        out.print("functionname");
+        out.print((node.kind == GET_TOKEN ? " get" :
             node.kind == SET_TOKEN ? " set" : ""));
         push_in();
         if (node.identifier != null)
@@ -1158,7 +1223,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, FunctionSignatureNode node)
     {
         indent();
-        out.write(node.inits != null ? "constructorsignature" : "functionsignature" );
+        out.print(node.inits != null ? "constructorsignature" : "functionsignature" );
         push_in();
         if (node.parameter != null)
         {
@@ -1180,10 +1245,10 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ParameterNode node)
     {
         indent();
-        out.write("parameter");
+        out.print("parameter");
         if (node.kind == CONST_TOKEN)
         {
-            out.write(" const");
+            out.print(" const");
         }
         push_in();
         if (node.identifier != null)
@@ -1207,7 +1272,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, RestExpressionNode node)
     {
         indent();
-        out.write("restexpression");
+        out.print("restexpression");
         push_in();
         if (node.expr != null)
         {
@@ -1220,7 +1285,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, RestParameterNode node)
     {
         indent();
-        out.write("restparameter");
+        out.print("restparameter");
         push_in();
         if (node.parameter != null)
         {
@@ -1233,7 +1298,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ClassDefinitionNode node)
     {
         indent();
-        out.write("class");
+        out.print("class");
         push_in();
         if (node.attrs != null)
         {
@@ -1244,15 +1309,34 @@ public class NodePrinter implements Evaluator
         {
             node.name.evaluate(cx, this);
         }
+        
+        hdr.write("@interface " + lastQualifiedidentifier + " : ");
+        identifiers.clear();
+        
         separate();
         if (node.baseclass != null)
         {
             node.baseclass.evaluate(cx, this);
         }
+        String baseClass = lastIdentifier();
+        hdr.write(baseClass == null ? "NSObject" : baseClass);
+        
         separate();
         if (node.interfaces != null)
         {
-            node.interfaces.evaluate(cx, this);
+        	identifiers.clear();
+        	node.interfaces.evaluate(cx, this);
+        	hdr.write("<");
+        	int interfaceCount = identifiers.size();
+        	for (int interfaceIndex = 0; interfaceIndex < interfaceCount; interfaceIndex++)
+			{
+				hdr.write(CodeHelper.identifier(lastIdentifier()));
+				if (interfaceIndex < interfaceCount - 1)
+				{
+					hdr.write(", ");
+				}
+			}
+        	hdr.write(">");
         }
         separate();
         if (node.statements != null)
@@ -1266,7 +1350,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, InterfaceDefinitionNode node)
     {
         indent();
-        out.write("interface");
+        out.print("interface");
         push_in();
         if (node.attrs != null)
         {
@@ -1294,7 +1378,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ClassNameNode node)
     {
         indent();
-        out.write("classname");
+        out.print("classname");
         push_in();
         if (node.pkgname != null)
         {
@@ -1316,7 +1400,7 @@ public class NodePrinter implements Evaluator
         if (node.baseclass != null)
         {
             indent();
-            out.write("extends");
+            out.print("extends");
             push_in();
             node.baseclass.evaluate(cx, this);
             pop_out();
@@ -1325,7 +1409,7 @@ public class NodePrinter implements Evaluator
         if (node.interfaces != null)
         {
             indent();
-            out.write("implements");
+            out.print("implements");
             push_in();
             node.interfaces.evaluate(cx, this);
             pop_out();
@@ -1336,7 +1420,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, NamespaceDefinitionNode node)
     {
         indent();
-        out.write("namespace");
+        out.print("namespace");
         push_in();
         if (node.attrs != null)
         {
@@ -1362,7 +1446,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ConfigNamespaceDefinitionNode node)
     {
         indent();
-        out.write("config namespace");
+        out.print("config namespace");
         push_in();
         if (node.attrs != null)
         {
@@ -1389,20 +1473,33 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, PackageDefinitionNode node)
     {
         indent();
-        out.write("package");
+        out.print("package");
+        hdr.write("package ");
         push_in();
         if (node.name != null)
         {
             node.name.evaluate(cx, this);
         }
         pop_out();
+        
+        ObjectList<IdentifierNode> list = node.name.id.list;
+        int nodeIndex = 0;
+        for (IdentifierNode nameNode : list)
+		{
+			hdr.write(nameNode.name);
+			if (++nodeIndex < list.size())
+				hdr.write(".");
+		}
+        
+        hdr.writeln(";");
+        
         return null;
     }
 
     public Value evaluate(Context cx, PackageIdentifiersNode node)
     {
         indent();
-        out.write("packageidentifiers");
+        out.print("packageidentifiers");
         push_in();
 
         for (IdentifierNode n : node.list)
@@ -1418,7 +1515,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, PackageNameNode node)
     {
         indent();
-        out.write("packagename");
+        out.print("packagename");
         push_in();
         if (node.id != null)
         {
@@ -1431,43 +1528,43 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, ProgramNode node)
     {
         indent();
-        out.write("program");
+        out.print("program");
         push_in();
         if (node.statements != null)
         {
             node.statements.evaluate(cx, this);
         }
         pop_out();
-        out.writeln();
+        out.println();
         return null;
     }
 
     public Value evaluate(Context cx, ErrorNode node)
     {
         indent();
-        out.write("error");
-        out.write(node.errorCode);
+        out.print("error");
+        out.print(node.errorCode);
         return null;
     }
 
     public Value evaluate(Context cx, ToObjectNode node)
     {
         indent();
-        out.write("toobject");
+        out.print("toobject");
         push_in();
         if (node.expr != null)
         {
             node.expr.evaluate(cx, this);
         }
         pop_out();
-        out.writeln();
+        out.println();
         return null;
     }
 
     public Value evaluate(Context cx, LoadRegisterNode node)
     {
         indent();
-        out.write("loadregister");
+        out.print("loadregister");
         push_in();
         if (node.reg != null)
         {
@@ -1480,7 +1577,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, StoreRegisterNode node)
     {
         indent();
-        out.write("storeregister");
+        out.print("storeregister");
         push_in();
         if (node.reg != null)
         {
@@ -1493,24 +1590,24 @@ public class NodePrinter implements Evaluator
             node.expr.evaluate(cx, this);
         }
         pop_out();
-        out.writeln();
+        out.println();
         return null;
     }
 
     public Value evaluate(Context cx, RegisterNode node)
     {
         indent();
-        out.write("register");
+        out.print("register");
 
         push_in();
-        out.write(node.index);
+        out.print(node.index);
         return null;
     }
 
     public Value evaluate(Context cx, HasNextNode node)
     {
         indent();
-        out.write("hasNext");
+        out.print("hasNext");
 
         push_in();
         if (node.objectRegister != null)
@@ -1524,15 +1621,15 @@ public class NodePrinter implements Evaluator
             node.indexRegister.evaluate(cx, this);
         }
         pop_out();
-        out.writeln();
+        out.println();
         return null;
     }
     
     public Value evaluate(Context cx, BoxNode node)
     {
         indent();
-        out.write("box");
-        out.write(node.actual);
+        out.print("box");
+        out.print(node.actual);
         push_in();
         if (node.expr != null)
         {
@@ -1545,7 +1642,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, CoerceNode node)
     {
         indent();
-        out.write("coerce");
+        out.print("coerce");
         push_in();
         if (node.expr != null)
         {
@@ -1558,7 +1655,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, PragmaNode node)
     {
         indent();
-        out.write("pragma");
+        out.print("pragma");
         push_in();
         if (node.list != null)
         {
@@ -1571,7 +1668,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, UsePrecisionNode node)
     {
         indent();
-        out.write("usePrecision(" + node.precision + ")");
+        out.print("usePrecision(" + node.precision + ")");
         return null;
     }
 
@@ -1579,21 +1676,21 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, UseNumericNode node)
     {
         indent();
-        out.write("useNumeric(" + usageName[node.numeric_mode] + ")");
+        out.print("useNumeric(" + usageName[node.numeric_mode] + ")");
         return null;
     }
 
     public Value evaluate(Context cx, UseRoundingNode node)
     {
         indent();
-        out.write("useRounding(" + NumberUsage.roundingModeName[node.mode] + ")");
+        out.print("useRounding(" + NumberUsage.roundingModeName[node.mode] + ")");
         return null;
     }
 
     public Value evaluate(Context cx, PragmaExpressionNode node)
     {
         indent();
-        out.write("pragmaitem");
+        out.print("pragmaitem");
         push_in();
         if (node.identifier != null)
         {
@@ -1606,7 +1703,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate( Context cx, ParameterListNode node )
     {
         indent();
-        out.write("parameterlist");
+        out.print("parameterlist");
 
         push_in();
 
@@ -1639,22 +1736,22 @@ public class NodePrinter implements Evaluator
         }
 
         indent();
-        out.write("metadata:");
-        out.write(node.getId() !=null? node.getId() :"");
-        out.write(" ");
+        out.print("metadata:");
+        out.print(node.getId() !=null? node.getId() :"");
+        out.print(" ");
         for (int i = 0, length = (node.getValues() == null) ? 0 : node.getValues().length; i < length; i++)
         {
             Value v = node.getValues()[i];
             if (v instanceof MetaDataEvaluator.KeyValuePair)
             {
                 MetaDataEvaluator.KeyValuePair pair = (MetaDataEvaluator.KeyValuePair) v;
-                out.write("[" + pair.key + "," + pair.obj + "]");
+                out.print("[" + pair.key + "," + pair.obj + "]");
             }
 
             if (v instanceof MetaDataEvaluator.KeylessValue)
             {
                 MetaDataEvaluator.KeylessValue val = (MetaDataEvaluator.KeylessValue) v;
-                out.write("[" + val.obj + "]");
+                out.print("[" + val.obj + "]");
             }
         }
         return null;
@@ -1663,7 +1760,7 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, DefaultXMLNamespaceNode node)
     {
         indent();
-        out.write("dxns");
+        out.print("dxns");
         push_in();
         if (node.expr != null)
         {
@@ -1702,13 +1799,26 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, TypeExpressionNode node)
     {
         indent();
-        out.write("typeexpr");
+        out.print("typeexpr");
         push_in();
+        
+        
+        
+        MemberExpressionNode member = (MemberExpressionNode) node.expr;
+        GetExpressionNode expr = (GetExpressionNode) member.selector;
+        IdentifierNode identifier = (IdentifierNode) expr.expr;
+        lastType = identifier.name;
+        
         if (node.expr != null)
         {
             node.expr.evaluate(cx, this);
         }
         pop_out();
         return null;
+    }
+    
+    private String lastIdentifier()
+    {
+    	return identifiers.pollLast();
     }
 }
