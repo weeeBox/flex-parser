@@ -26,11 +26,16 @@ import static macromedia.asc.parser.Tokens.LEFTBRACKET_TOKEN;
 import static macromedia.asc.parser.Tokens.LEFTPAREN_TOKEN;
 import static macromedia.asc.parser.Tokens.SET_TOKEN;
 
+import java.io.IOException;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
+import code.ASClassDeclaration;
+import code.ASCodeBlock;
+import code.ASDeclaration;
+import code.ASFunctionDeclaration;
 import code.ASMemberDeclaration;
 
 import macromedia.asc.parser.*;
@@ -49,20 +54,26 @@ import macromedia.asc.util.ObjectList;
 public class NodePrinter implements Evaluator
 {
     private PrintStream out;
-    private WriteDestination hdr;
-    private WriteDestination imp;
     private int level;
     private int mode;
 
-    private String lastFunction;
     private String lastVisiblity;
     private String lastQualifiedidentifier;
-    private String lastType;
+    private String lastFunctionName;
     
     private boolean staticFound;
+    private boolean isConstructor;
     
-    private List<ASMemberDeclaration> members = new ArrayList<ASMemberDeclaration>();
     private LinkedList<String> identifiers = new LinkedList<String>();
+    private LinkedList<String> types = new LinkedList<String>();
+    
+    private IWriteDestination nullBlock = new NullWriteDestination();
+    private IWriteDestination block = nullBlock;
+    
+    private List<ASClassDeclaration> classes = new ArrayList<ASClassDeclaration>();
+    
+    private ASClassDeclaration lastClass;
+    private ASFunctionDeclaration lastFunction;
     
     private void separate()
     {
@@ -101,9 +112,8 @@ public class NodePrinter implements Evaluator
         return true; // return true;
     }
 
-    public NodePrinter(WriteDestination headerDest, WriteDestination implDest)
+    public NodePrinter()
     {
-    	this.hdr = headerDest;
         this.out = System.out;
         this.level = 0;
     }
@@ -314,10 +324,26 @@ public class NodePrinter implements Evaluator
             node.signature.evaluate(cx, this);
         }
         separate();
+        
+        
+        try
+		{
+			ASCodeBlock codeBlock = new ASCodeBlock();
+			lastFunction.setBody(codeBlock);
+			block = new WriteDestination(codeBlock.getStream());
+		}
+		catch (IOException e)
+		{
+			e.printStackTrace();
+		}
+        
         if (node.body != null)
         {
             node.body.evaluate(cx, this);
         }
+        
+        block = nullBlock;
+        
         pop_out();
         return null;
     }
@@ -509,7 +535,7 @@ public class NodePrinter implements Evaluator
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
-        hdr.write((node.getMode() == LEFTBRACKET_TOKEN ? "" :
+        block.write((node.getMode() == LEFTBRACKET_TOKEN ? "" :
             node.getMode() == LEFTPAREN_TOKEN ? "" :
             node.getMode() == DOUBLEDOT_TOKEN ? "" :
             node.getMode() == EMPTY_TOKEN ? "" : "."));
@@ -550,7 +576,7 @@ public class NodePrinter implements Evaluator
         out.print("unary");
         push_in();
         out.print(Token.getTokenClassName(node.op));
-        hdr.write(CodeHelper.tokenName(node.op));
+        block.write(CodeHelper.tokenName(node.op));
         pop_out();
         separate();
         push_in();
@@ -651,9 +677,9 @@ public class NodePrinter implements Evaluator
     {
         indent();
         out.print("statementlist");
-        hdr.writeln();
-        hdr.writeln("{");
-        hdr.incTab();
+        block.writeln();
+        block.writeln("{");
+        block.incTab();
         push_in();
 
         for (Node n : node.items)
@@ -666,9 +692,9 @@ public class NodePrinter implements Evaluator
 
         pop_out();
         
-        hdr.decTab();
-        hdr.writeln("");
-        hdr.writeln("}");
+        block.decTab();
+        block.writeln("");
+        block.writeln("}");
         
         return null;
     }
@@ -737,13 +763,13 @@ public class NodePrinter implements Evaluator
     {
         indent();
         out.print("if");
-        hdr.write("if(");
+        block.write("if(");
         push_in();
         if (node.condition != null)
         {
             node.condition.evaluate(cx, this);
         }
-        hdr.writeln(")");
+        block.writeln(")");
         pop_out();
         separate();
         push_in();
@@ -1041,7 +1067,6 @@ public class NodePrinter implements Evaluator
     {
         indent();
         out.print("import");
-        hdr.write("#import ");
         push_in();
         if (node.attrs != null)
         {
@@ -1057,7 +1082,7 @@ public class NodePrinter implements Evaluator
         pop_out();
         
         ObjectList<IdentifierNode> list = node.name.id.list;
-        hdr.writeln('"' + list.at(list.size() - 1).name + ".h" + '"');
+//        block.writeln('"' + list.at(list.size() - 1).name + ".h" + '"');
 
         return null;
     }
@@ -1082,7 +1107,6 @@ public class NodePrinter implements Evaluator
 
     public Value evaluate(Context cx, VariableDefinitionNode node)
     {
-    	staticFound = false;
     	boolean isConst = false;
     	
         indent();
@@ -1109,11 +1133,11 @@ public class NodePrinter implements Evaluator
         }
         pop_out();
         
-        ASMemberDeclaration member = new ASMemberDeclaration(lastType, lastIdentifier(), lastVisiblity);
+        ASMemberDeclaration member = new ASMemberDeclaration(lastTypes(), lastQualifiedidentifier, lastVisiblity);
         member.setStatic(staticFound);
         member.setConst(isConst);
         
-        members.add(member);
+        lastClass.addMember(member);
         
         staticFound = false;
         
@@ -1193,7 +1217,6 @@ public class NodePrinter implements Evaluator
         if (node.name != null)
         {
             node.name.evaluate(cx, this);
-            lastFunction = node.name.identifier.name;
         }
         separate();
         if (node.fexpr != null)
@@ -1223,22 +1246,39 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, FunctionSignatureNode node)
     {
         indent();
-        out.print(node.inits != null ? "constructorsignature" : "functionsignature" );
+        
+        String name = lastQualifiedidentifier;
+        
+        isConstructor = node.inits != null;
+
+        out.print(isConstructor ? "constructorsignature" : "functionsignature" );
+        
+        String returnType = null;
+        if (node.result != null)
+        {
+            node.result.evaluate(cx, this);
+            returnType = lastTypes();
+        }
+        
+        lastFunction = new ASFunctionDeclaration(returnType, name, lastVisiblity);
+        lastFunction.setStatic(staticFound);
+        lastClass.addFunction(lastFunction);
+        staticFound = false;
+        
         push_in();
         if (node.parameter != null)
         {
             node.parameter.evaluate(cx, this);
         }
         separate();
-        if (node.result != null)
-        {
-            node.result.evaluate(cx, this);
-        }
-        if (node.inits != null)
+        
+        if (isConstructor)
         {
         	node.inits.evaluate(cx, this);
         }
         pop_out();
+        
+        
         return null;
     }
 
@@ -1310,7 +1350,9 @@ public class NodePrinter implements Evaluator
             node.name.evaluate(cx, this);
         }
         
-        hdr.write("@interface " + lastQualifiedidentifier + " : ");
+        lastClass = new ASClassDeclaration(lastQualifiedidentifier);
+        classes.add(lastClass);
+        
         identifiers.clear();
         
         separate();
@@ -1319,24 +1361,21 @@ public class NodePrinter implements Evaluator
             node.baseclass.evaluate(cx, this);
         }
         String baseClass = lastIdentifier();
-        hdr.write(baseClass == null ? "NSObject" : baseClass);
+        if (baseClass != null)
+        {
+        	lastClass.setSuperClass(baseClass);
+        }
         
         separate();
         if (node.interfaces != null)
         {
         	identifiers.clear();
         	node.interfaces.evaluate(cx, this);
-        	hdr.write("<");
         	int interfaceCount = identifiers.size();
         	for (int interfaceIndex = 0; interfaceIndex < interfaceCount; interfaceIndex++)
 			{
-				hdr.write(CodeHelper.identifier(lastIdentifier()));
-				if (interfaceIndex < interfaceCount - 1)
-				{
-					hdr.write(", ");
-				}
+        		lastClass.addInterface(lastIdentifier());
 			}
-        	hdr.write(">");
         }
         separate();
         if (node.statements != null)
@@ -1474,7 +1513,6 @@ public class NodePrinter implements Evaluator
     {
         indent();
         out.print("package");
-        hdr.write("package ");
         push_in();
         if (node.name != null)
         {
@@ -1482,16 +1520,16 @@ public class NodePrinter implements Evaluator
         }
         pop_out();
         
-        ObjectList<IdentifierNode> list = node.name.id.list;
-        int nodeIndex = 0;
-        for (IdentifierNode nameNode : list)
-		{
-			hdr.write(nameNode.name);
-			if (++nodeIndex < list.size())
-				hdr.write(".");
-		}
-        
-        hdr.writeln(";");
+//        ObjectList<IdentifierNode> list = node.name.id.list;
+//        int nodeIndex = 0;
+//        for (IdentifierNode nameNode : list)
+//		{
+//			block.write(nameNode.name);
+//			if (++nodeIndex < list.size())
+//				block.write(".");
+//		}
+//        
+//        block.writeln(";");
         
         return null;
     }
@@ -1710,7 +1748,13 @@ public class NodePrinter implements Evaluator
         for (int i = 0, size = node.items.size(); i < size; i++)
         {
             ParameterNode param = node.items.get(i);
+            
+            
+            String type = type((TypeExpressionNode) param.type).name;
+            String name = param.identifier.name;
 
+            lastFunction.addParam(new ASDeclaration(type, name));
+            
             if (param != null)
             {
                 param.evaluate(cx, this);
@@ -1802,12 +1846,7 @@ public class NodePrinter implements Evaluator
         out.print("typeexpr");
         push_in();
         
-        
-        
-        MemberExpressionNode member = (MemberExpressionNode) node.expr;
-        GetExpressionNode expr = (GetExpressionNode) member.selector;
-        IdentifierNode identifier = (IdentifierNode) expr.expr;
-        lastType = identifier.name;
+        types.add(type(node).name);
         
         if (node.expr != null)
         {
@@ -1816,9 +1855,27 @@ public class NodePrinter implements Evaluator
         pop_out();
         return null;
     }
+ 
+    private IdentifierNode type(TypeExpressionNode node)
+	{
+		MemberExpressionNode member = (MemberExpressionNode) node.expr;
+        GetExpressionNode expr = (GetExpressionNode) member.selector;
+        IdentifierNode identifier = (IdentifierNode) expr.expr;
+		return identifier;
+	}
     
     private String lastIdentifier()
     {
     	return identifiers.pollLast();
     }
+    
+    private String lastTypes()
+    {
+    	return types.pollLast();
+    }
+    
+    public List<ASClassDeclaration> getClasses()
+	{
+		return classes;
+	}
 }
