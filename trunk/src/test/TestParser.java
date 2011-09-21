@@ -21,11 +21,14 @@ public class TestParser
 			Context cx = new Context(statics);
 			Parser parser = new Parser(cx, new FileInputStream(file), file.getPath());
 			
-			WriteDestination out = new WriteDestination(System.out);
+			WriteDestination headerDest = new WriteDestination(new File("d:/dev/out.h"));
+			WriteDestination implDest = new WriteDestination(new File("d:/dev/out.mm"));
 			
 			ProgramNode programNode = parser.parseProgram();			
-			NodePrinter printer = new NodePrinter(out);
+			NodePrinter printer = new NodePrinter(headerDest, implDest);
 			printer.evaluate(cx, programNode);
+			headerDest.close();
+			implDest.close();
 			
 		}
 		catch (IOException e)
