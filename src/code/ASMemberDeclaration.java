@@ -1,28 +1,15 @@
 package code;
 
-public class ASMemberDeclaration
+public class ASMemberDeclaration extends ASDeclaration
 {
-	private String type;
-	private String name;
 	private String visiblity;
 	private boolean isStatic;
 	private boolean isConst;
 
 	public ASMemberDeclaration(String type, String name, String visiblity)
 	{
-		this.type = type;
-		this.name = name;
+		super(type, name);
 		this.visiblity = visiblity;
-	}
-
-	public String getType()
-	{
-		return type;
-	}
-
-	public String getName()
-	{
-		return name;
 	}
 
 	public String getVisiblity()

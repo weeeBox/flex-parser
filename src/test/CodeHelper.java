@@ -14,4 +14,9 @@ public class CodeHelper
 	{
 		return name;
 	}
+	
+	public static String type(String name)
+	{
+		return name;
+	}
 }
