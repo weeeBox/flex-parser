@@ -21,8 +21,10 @@ public class TestParser
 			Context cx = new Context(statics);
 			Parser parser = new Parser(cx, new FileInputStream(file), file.getPath());
 			
+			WriteDestination out = new WriteDestination(System.out);
+			
 			ProgramNode programNode = parser.parseProgram();			
-			NodePrinter printer = new NodePrinter();
+			NodePrinter printer = new NodePrinter(out);
 			printer.evaluate(cx, programNode);
 			
 		}
