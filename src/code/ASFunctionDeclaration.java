@@ -7,6 +7,8 @@ public class ASFunctionDeclaration extends ASMemberDeclaration
 {
 	private List<ASDeclaration> params;
 	
+	private boolean isConstructor;
+	
 	private ASCodeBlock body;
 	
 	public ASFunctionDeclaration(String type, String name, String visiblity)
@@ -18,6 +20,21 @@ public class ASFunctionDeclaration extends ASMemberDeclaration
 	public void addParam(ASDeclaration param)
 	{
 		params.add(param);
+	}
+
+	public List<ASDeclaration> getParams()
+	{
+		return params;
+	}
+
+	public boolean isConstructor()
+	{
+		return isConstructor;
+	}
+
+	public void setConstructor(boolean isConstructor)
+	{
+		this.isConstructor = isConstructor;
 	}
 
 	public ASCodeBlock getBody()

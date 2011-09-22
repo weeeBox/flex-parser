@@ -42,6 +42,7 @@ public class ASClassDeclaration extends ASDeclaration
 	
 	public void addFunction(ASFunctionDeclaration function)
 	{
+		function.setConstructor(function.getName().equals(getName()));
 		functions.add(function);
 	}
 
