@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.List;
 
 import code.ASClassDeclaration;
+import code.ASCodeBlock;
 import code.ASDeclaration;
 import code.ASFunctionDeclaration;
 import code.ASMemberDeclaration;
@@ -69,12 +70,8 @@ public class TestParser
 		impl.writeln("@implementation " + className);
 		hdr.writeln("@inteface " + className + " : " + superType);
 		
-		impl.incTab();
-		
 		writeMembers(aClass, hdr);
 		writeFunctions(aClass, hdr, impl);
-		
-		impl.decTab();
 
 		hdr.writeln("@end");
 		hdr.writeln();
@@ -108,6 +105,7 @@ public class TestParser
 		{
 			writeFunctionSignature(func, hdr);
 			writeFunctionSignature(func, impl);
+			writeFunctionBody(func, impl);
 			
 			hdr.writeln(";");
 			impl.writeln();
@@ -134,5 +132,12 @@ public class TestParser
 					dest.write(" ");
 			}
 		}
+	}
+	
+	private static void writeFunctionBody(ASFunctionDeclaration func, IWriteDestination dest)
+	{
+		ASCodeBlock body = func.getBody();
+		String bodyCode = body.getStream().toString();
+		dest.write(bodyCode);
 	}
 }
