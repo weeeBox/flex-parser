@@ -19,20 +19,22 @@ public class TestParser
 {
 	public static void main(String[] args)
 	{
-		File file = new File(args[0]);
+		File srcFile = new File(args[0]);
+		File outputDir = new File(args[1]);
 		
 		try
 		{
 			ContextStatics statics = new ContextStatics();
 			Context cx = new Context(statics);
-			Parser parser = new Parser(cx, new FileInputStream(file), file.getPath());
-			
+			Parser parser = new Parser(cx, new FileInputStream(srcFile), srcFile.getPath());
 			
 			ProgramNode programNode = parser.parseProgram();			
 			NodePrinter printer = new NodePrinter();
 			printer.evaluate(cx, programNode);
 			
-			write(printer.getClasses());
+			String filename = srcFile.getName();
+			String moduleName = filename.substring(0, filename.lastIndexOf('.'));
+			write(printer.getClasses(), outputDir, moduleName);
 			
 		}
 		catch (IOException e)
@@ -42,11 +44,14 @@ public class TestParser
 		}
 	}
 
-	private static void write(List<ASClassDeclaration> classes) throws IOException
+	private static void write(List<ASClassDeclaration> classes, File outputDir, String moduleName) throws IOException
 	{
-		WriteDestination headerDest = new WriteDestination(new File("d:/dev/out.h"));
-		WriteDestination implDest = new WriteDestination(new File("d:/dev/out.mm"));
+		WriteDestination headerDest = new WriteDestination(new File(outputDir, moduleName + ".h"));
+		WriteDestination implDest = new WriteDestination(new File(outputDir, moduleName + ".m"));
 
+		implDest.writeln("#import \"" + moduleName + ".h\"");
+		implDest.writeln();
+		
 		for (ASClassDeclaration aClass : classes)
 		{
 			write(aClass, headerDest, implDest);
@@ -61,13 +66,21 @@ public class TestParser
 		String className = aClass.getName();
 		String superType = aClass.hasSuperClass() ? aClass.getSuperClass() : "NSObject";
 		
+		impl.writeln("@implementation " + className);
 		hdr.writeln("@inteface " + className + " : " + superType);
 		
+		impl.incTab();
+		
 		writeMembers(aClass, hdr);
-		writeFunctions(aClass, hdr);
+		writeFunctions(aClass, hdr, impl);
+		
+		impl.decTab();
 
 		hdr.writeln("@end");
 		hdr.writeln();
+		
+		impl.writeln("@end");
+		impl.writeln();
 	}
 
 	private static void writeMembers(ASClassDeclaration aClass, IWriteDestination hdr)
@@ -88,31 +101,38 @@ public class TestParser
 		}
 	}
 	
-	private static void writeFunctions(ASClassDeclaration aClass, IWriteDestination hdr)
+	private static void writeFunctions(ASClassDeclaration aClass, IWriteDestination hdr, IWriteDestination impl)
 	{
 		List<ASFunctionDeclaration> functions = aClass.getFunctions();
 		for (ASFunctionDeclaration func : functions)
 		{
-			boolean isStatic = func.isStatic();
-			String name = func.getName(); 
-			String type = func.getType();
-			type = type == null ? (func.isConstructor() ? "id" : "void") : type;
-			name = func.isConstructor() ? "init" : name;
-			
-			hdr.write(String.format("%s (%s)%s", isStatic ? "+" : "-", type, name));
-			List<ASDeclaration> params = func.getParams();
-			if (params.size() > 0)
-			{
-				int paramIndex = 0;
-				for (ASDeclaration param : params)
-				{
-					hdr.write(":(" + param.getType() + ")" + param.getName());
-					if (++paramIndex < params.size())
-						hdr.write(" ");
-				}
-			}
+			writeFunctionSignature(func, hdr);
+			writeFunctionSignature(func, impl);
 			
 			hdr.writeln(";");
+			impl.writeln();
+		}
+	}
+
+	private static void writeFunctionSignature(ASFunctionDeclaration func, IWriteDestination dest)
+	{
+		boolean isStatic = func.isStatic();
+		String name = func.getName(); 
+		String type = func.getType();
+		type = type == null ? (func.isConstructor() ? "id" : "void") : type;
+		name = func.isConstructor() ? "init" : name;
+		
+		dest.write(String.format("%s (%s)%s", isStatic ? "+" : "-", type, name));
+		List<ASDeclaration> params = func.getParams();
+		if (params.size() > 0)
+		{
+			int paramIndex = 0;
+			for (ASDeclaration param : params)
+			{
+				dest.write(":(" + param.getType() + ")" + param.getName());
+				if (++paramIndex < params.size())
+					dest.write(" ");
+			}
 		}
 	}
 }
