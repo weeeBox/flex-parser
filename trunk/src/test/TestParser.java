@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.List;
 
 import code.ASClassDeclaration;
+import code.ASDeclaration;
 import code.ASFunctionDeclaration;
 import code.ASMemberDeclaration;
 
@@ -94,9 +95,24 @@ public class TestParser
 		{
 			boolean isStatic = func.isStatic();
 			String name = func.getName(); 
-			String type = func.getType(); type = type == null ? "void" : type;
+			String type = func.getType();
+			type = type == null ? (func.isConstructor() ? "id" : "void") : type;
+			name = func.isConstructor() ? "init" : name;
 			
-			hdr.writeln(String.format("%s (%s)%s", isStatic ? "+" : "-", type, name));
+			hdr.write(String.format("%s (%s)%s", isStatic ? "+" : "-", type, name));
+			List<ASDeclaration> params = func.getParams();
+			if (params.size() > 0)
+			{
+				int paramIndex = 0;
+				for (ASDeclaration param : params)
+				{
+					hdr.write(":(" + param.getType() + ")" + param.getName());
+					if (++paramIndex < params.size())
+						hdr.write(" ");
+				}
+			}
+			
+			hdr.writeln(";");
 		}
 	}
 }
