@@ -57,12 +57,27 @@ public class NodePrinter implements Evaluator
     private int level;
     private int mode;
 
+    private enum ExpressionMode
+    {
+    	GET,
+    	SET,
+    	ASSIGN,
+    	CALL,
+    	CALL_SELF,
+    	CALL_CONSTRUCTOR,
+    	IVOKE
+    };    
+    
     private String lastVisiblity;
     private String lastQualifiedidentifier;
     private String lastFunctionName;
     
     private boolean staticFound;
-    private boolean isConstructor;
+    
+    private boolean insideOperator;
+    
+    private LinkedList<ExpressionMode> expressionModes = new LinkedList<NodePrinter.ExpressionMode>();
+    private ExpressionMode lastExpressionMode;
     
     private LinkedList<String> identifiers = new LinkedList<String>();
     private LinkedList<String> types = new LinkedList<String>();
@@ -144,6 +159,18 @@ public class NodePrinter implements Evaluator
         else
         {
             out.print("identifier ");
+            ExpressionMode expressionMode = expressionMode();
+			if (expressionMode != null)
+			{
+				if (expressionMode == ExpressionMode.CALL_CONSTRUCTOR)
+				{
+					block.write("[" + node.name + " alloc] init");
+				}
+				else
+				{
+					block.write(node.name);
+				}
+			}
         }
 		out.print(node.name);
 		String name = node.name;
@@ -197,6 +224,7 @@ public class NodePrinter implements Evaluator
     {
         indent();
         out.print("this");
+        block.write("self");
         return null;
     }
 
@@ -267,6 +295,7 @@ public class NodePrinter implements Evaluator
         indent();
         out.print("literalboolean ");
         out.print(node.value ? 1 : 0);
+        block.write(node.value ? "YES" : "NO");
         return null;
     }
 
@@ -275,6 +304,7 @@ public class NodePrinter implements Evaluator
         indent();
         out.print("literalnumber:");
         out.print(node.value);
+        block.write(node.value);
         return null;
     }
 
@@ -283,6 +313,9 @@ public class NodePrinter implements Evaluator
         indent();
         out.print("literalstring:");
         out.print(node.value);
+        
+        block.write("@\"" + node.value + "\"");
+        
         return null;
     }
 
@@ -290,6 +323,7 @@ public class NodePrinter implements Evaluator
     {
         indent();
         out.print("literalnull");
+        block.write("nil");
         return null;
     }
 
@@ -298,6 +332,7 @@ public class NodePrinter implements Evaluator
         indent();
         out.print("literalregexp:");
         out.print(node.value);
+        block.write(node.value);
         return null;
     }
 
@@ -402,10 +437,19 @@ public class NodePrinter implements Evaluator
         indent();
         out.print("literalarray");
         push_in();
+        
+        block.write("[NSArray arrayWithObjects:");
+        
         if (node.elementlist != null)
         {
-            node.elementlist.evaluate(cx, this);
+            for (Node n : node.elementlist.items)
+            {
+                n.evaluate(cx, this);
+                block.write(", ");
+                separate();
+            }
         }
+        block.write("nil]");
         pop_out();
         return null;
     }
@@ -480,12 +524,33 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, CallExpressionNode node)
     {
         indent();
-        out.print((node.is_new ? "construct" : "call"));
+		out.print((node.is_new ? "construct" : "call"));
         out.print((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
         push_in();
+
+        boolean isCallMade = false;
+        if (node.is_new)
+		{
+        	expressionModes.add(ExpressionMode.CALL_CONSTRUCTOR);
+			block.write("[");
+			isCallMade = true;
+		}
+        else if (node.getMode() == DOT_TOKEN)
+    	{
+    		expressionModes.add(ExpressionMode.CALL);
+    		block.write("[" + lastIdentifier() + " ");
+    		isCallMade = true;
+    	}
+    	else if (node.getMode() == EMPTY_TOKEN)
+    	{
+    		expressionModes.add(ExpressionMode.CALL_SELF);
+    		block.write("[self ");
+    		isCallMade = true;
+    	}
+        
         if (node.expr != null)
         {
             node.expr.evaluate(cx, this);
@@ -496,6 +561,12 @@ public class NodePrinter implements Evaluator
         {
             node.args.evaluate(cx, this);
         }
+        
+        if (isCallMade)
+		{
+			block.write("]");
+		}
+        
         pop_out();
         return null;
     }
@@ -530,14 +601,22 @@ public class NodePrinter implements Evaluator
     public Value evaluate(Context cx, GetExpressionNode node)
     {
         indent();
+        
         out.print("get");
         out.print((node.getMode() == LEFTBRACKET_TOKEN ? " bracket" :
             node.getMode() == LEFTPAREN_TOKEN ? " filter" :
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
-        block.write((node.getMode() == LEFTBRACKET_TOKEN ? "" :
-            node.getMode() == LEFTPAREN_TOKEN ? "" :
-            node.getMode() == DOUBLEDOT_TOKEN ? "" :
+        
+        if (node.getMode() == DOT_TOKEN)
+        {
+        	expressionModes.add(ExpressionMode.GET);
+        	block.write(lastIdentifier());
+        }
+        
+        block.write((node.getMode() == LEFTBRACKET_TOKEN ? "[" :
+            node.getMode() == LEFTPAREN_TOKEN ? "(" :
+            node.getMode() == DOUBLEDOT_TOKEN ? "\"" :
             node.getMode() == EMPTY_TOKEN ? "" : "."));
         push_in();
         if (node.expr != null)
@@ -557,6 +636,17 @@ public class NodePrinter implements Evaluator
             node.getMode() == DOUBLEDOT_TOKEN ? " descend" :
             node.getMode() == EMPTY_TOKEN ? " lexical" : " dot"));
         push_in();
+        
+        if (node.getMode() == DOT_TOKEN)
+        {
+        	expressionModes.add(ExpressionMode.SET);
+        	block.write(lastIdentifier() + ".");
+        }
+        if (node.getMode() == EMPTY_TOKEN)
+        {
+        	expressionModes.add(ExpressionMode.SET);
+        }
+        
         if (node.expr != null)
         {
             node.expr.evaluate(cx, this);
@@ -639,6 +729,12 @@ public class NodePrinter implements Evaluator
     {
         indent();
         out.print("argumentlist");
+        if (lastExpressionMode == ExpressionMode.CALL ||
+        	lastExpressionMode == ExpressionMode.CALL_CONSTRUCTOR || 
+        	lastExpressionMode == ExpressionMode.CALL_SELF)
+        	block.write(":");
+        else
+        	block.write(" = ");
 
         push_in();
 
@@ -649,7 +745,7 @@ public class NodePrinter implements Evaluator
         }
 
         pop_out();
-
+        
         return null;
     }
 
@@ -693,7 +789,6 @@ public class NodePrinter implements Evaluator
         pop_out();
         
         block.decTab();
-        block.writeln("");
         block.writeln("}");
         
         return null;
@@ -722,6 +817,7 @@ public class NodePrinter implements Evaluator
         {
             node.expr.evaluate(cx, this);
         }
+        block.writeln(";");
         pop_out();
         return null;
     }
@@ -769,7 +865,7 @@ public class NodePrinter implements Evaluator
         {
             node.condition.evaluate(cx, this);
         }
-        block.writeln(")");
+        block.write(")");
         pop_out();
         separate();
         push_in();
@@ -782,6 +878,7 @@ public class NodePrinter implements Evaluator
         push_in();
         if (node.elseactions != null)
         {
+        	block.write("else");
             node.elseactions.evaluate(cx, this);
         }
         pop_out();
@@ -1249,9 +1346,7 @@ public class NodePrinter implements Evaluator
         
         String name = lastQualifiedidentifier;
         
-        isConstructor = node.inits != null;
-
-        out.print(isConstructor ? "constructorsignature" : "functionsignature" );
+        out.print(node.inits != null ? "constructorsignature" : "functionsignature" );
         
         String returnType = null;
         if (node.result != null)
@@ -1272,7 +1367,7 @@ public class NodePrinter implements Evaluator
         }
         separate();
         
-        if (isConstructor)
+        if ((node.inits != null))
         {
         	node.inits.evaluate(cx, this);
         }
@@ -1872,6 +1967,12 @@ public class NodePrinter implements Evaluator
     private String lastTypes()
     {
     	return types.pollLast();
+    }
+    
+    private ExpressionMode expressionMode()
+    {
+    	lastExpressionMode = expressionModes.pollLast();
+		return lastExpressionMode;
     }
     
     public List<ASClassDeclaration> getClasses()
